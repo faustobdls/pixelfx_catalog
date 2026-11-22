@@ -1,0 +1,15 @@
+name: pixelfx_catalog
+description: Official pixelfx effect catalog ported 1:1 to Dart as a PixelFxExtension.
+version: 0.1.0
+repository: https://github.com/faustobdls/pixelfx_flutter
+resolution: workspace
+
+environment:
+  sdk: ^3.14.0
+
+dependencies:
+  pixelfx_core: ^0.1.0
+
+dev_dependencies:
+  lints: ^6.0.0
+  test: ^1.25.0
