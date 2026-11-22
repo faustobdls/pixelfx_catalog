@@ -1,7 +1,7 @@
 name: pixelfx_catalog
-description: Official pixelfx effect catalog ported 1:1 to Dart as a PixelFxExtension.
+description: Official pixelfx effect catalog ported 1:1 to Dart (244 procedural pixel-art effects across 21 categories) as a PixelFxExtension.
 version: 0.1.0
-repository: https://github.com/faustobdls/pixelfx_flutter
+repository: https://github.com/faustobdls/pixelfx_catalog
 resolution: workspace
 
 environment:
