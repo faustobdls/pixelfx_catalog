@@ -371,7 +371,7 @@ class PixelFxCatalogExtension extends PixelFxExtension {
   ExtensionManifest get manifest => const ExtensionManifest(
         id: 'pixelfx.catalog',
         name: 'Pixelfx Official Catalog',
-        version: '0.2.0-dev',
+        version: '0.1.0',
         description:
             'Complete 244-effect Pixelfx catalog across 21 categories: dual-buffer procedural pixel VFX, acted moves, pickups, critters, weather loops, and transitions ported 1:1 from patch-gg/pixelfx.',
         author: 'Patch / Sprite Fusion / Hollow Crown / Fausto BDLS',
