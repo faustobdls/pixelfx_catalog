@@ -226,6 +226,119 @@ void pass(
 double bayer(double x, double y) =>
     _bayerThresholds[((y.floor() & 3) << 2) | (x.floor() & 3)];
 
+class RowBuffer {
+  int w = 0;
+  Uint32List c = Uint32List(0);
+  Float32List a = Float32List(0);
+  Uint8List b = Uint8List(0);
+  Uint32List l = Uint32List(0);
+  Float32List k = Float32List(0);
+
+  void ensureWidth(int width) {
+    if (w == width) return;
+    w = width;
+    c = Uint32List(width);
+    a = Float32List(width);
+    b = Uint8List(width);
+    l = Uint32List(width);
+    k = Float32List(width);
+  }
+}
+
+final RowBuffer _rowBuffer = RowBuffer();
+
+/// Fast whole-sky row shader over local rows [y0d]..[y1d].
+void rows(
+  Painter p,
+  EffectMeta meta,
+  double y0d,
+  double y1d,
+  void Function(double y, RowBuffer r) fn,
+) {
+  final box = boxOf(meta);
+  final w = box.w;
+  final rBuf = _rowBuffer..ensureWidth(w);
+  final y0 = math.max(box.y0, y0d.floor());
+  final y1 = math.min(box.y1 - 1, y1d.ceil());
+  if (y0 > y1) return;
+  final rot = p.sn != 0.0;
+  final q = rot ? clip(p, meta) : null;
+  final cBuf = p.frame.color;
+  final lBuf = p.frame.light;
+  final stride = p.w;
+  final fade = p.fade;
+  final lk = p.lightK * fade;
+  final fx = p.fx.toDouble();
+
+  for (var y = y0; y <= y1; y++) {
+    rBuf.c.fillRange(0, w, 0);
+    rBuf.k.fillRange(0, w, 0.0);
+    rBuf.a.fillRange(0, w, 1.0);
+    rBuf.b.fillRange(0, w, 0);
+    fn(y + 0.5, rBuf);
+    if (rot) {
+      for (var i = 0; i < w; i++) {
+        if (rBuf.c[i] != 0) {
+          if (rBuf.b[i] != 0) {
+            q!.blend(box.x0 + i, y, rBuf.c[i], rBuf.a[i]);
+          } else {
+            q!.dot(box.x0 + i, y, rBuf.c[i], rBuf.a[i]);
+          }
+        }
+        if (rBuf.k[i] > 0.0) {
+          q!.light(box.x0 + i, y, rBuf.l[i] != 0 ? rBuf.l[i] : rBuf.c[i], rBuf.k[i]);
+        }
+      }
+      continue;
+    }
+    final sy = (p.ty + y + 0.5).floor();
+    final ry = sy - p.oy;
+    if (ry < 0 || ry >= p.h) continue;
+    final row = ry * stride;
+    final by = (sy & 3) << 2;
+    var sxf = p.tx + (box.x0 + 0.5) * fx;
+    for (var i = 0; i < w; i++, sxf += fx) {
+      final c = rBuf.c[i];
+      final kk = rBuf.k[i];
+      if (c == 0 && !(kk > 0.0)) continue;
+      final sx = sxf.floor();
+      final rx = sx - p.ox;
+      if (rx < 0 || rx >= stride) continue;
+      final j = row + rx;
+      if (c != 0) {
+        final a = rBuf.a[i] * fade;
+        if (rBuf.b[i] != 0) {
+          if (a > 0.004) {
+            final d = cBuf[j];
+            final da = (d >>> 24) / 255.0;
+            final oa = a + da * (1.0 - a);
+            final k = a / oa;
+            final m = 1.0 - k;
+            final r = ((c & 255) * k + (d & 255) * m).toInt() & 255;
+            final g = (((c >>> 8) & 255) * k + ((d >>> 8) & 255) * m).toInt() & 255;
+            final bl = (((c >>> 16) & 255) * k + ((d >>> 16) & 255) * m).toInt() & 255;
+            final outA = (oa * 255.0).toInt() & 255;
+            cBuf[j] = ((outA << 24) | (bl << 16) | (g << 8) | r) & 0xffffffff;
+          }
+        } else if (a >= 1.0 || a > _bayerThresholds[by | (sx & 3)]) {
+          cBuf[j] = c;
+        }
+      }
+      if (kk > 0.0) {
+        final k = kk * lk;
+        if (k > 0.004) {
+          final lc = rBuf.l[i] != 0 ? rBuf.l[i] : c;
+          final d = lBuf[j];
+          final r = math.min(255, ((d & 255) + (lc & 255) * k).toInt());
+          final g = math.min(255, (((d >>> 8) & 255) + ((lc >>> 8) & 255) * k).toInt());
+          final bl = math.min(255, (((d >>> 16) & 255) + ((lc >>> 16) & 255) * k).toInt());
+          lBuf[j] = ((255 << 24) | (bl << 16) | (g << 8) | r) & 0xffffffff;
+        }
+      }
+    }
+  }
+}
+
 class NoiseField {
   final int w;
   final int h;
@@ -365,4 +478,126 @@ bool crown(
     }
   }
   return true;
+}
+
+class BoltBranch {
+  final List<(double, double)> pts;
+  final double w;
+  final int depth;
+
+  const BoltBranch(this.pts, this.w, this.depth);
+}
+
+/// Branching lightning path from `(x0, y0)` to `(x1, y1)`.
+List<BoltBranch> tree(
+  Rng r,
+  double x0,
+  double y0,
+  double x1,
+  double y1, [
+  double jag = 0.3,
+  double forks = 0.4,
+  double w = 1.0,
+  int depth = 0,
+]) {
+  final out = <BoltBranch>[];
+  final l = math.sqrt((x1 - x0) * (x1 - x0) + (y1 - y0) * (y1 - y0));
+  var pts = <(double, double)>[(x0, y0), (x1, y1)];
+  var off = l * jag;
+  while (pts.length < 2.0 + l / 3.0) {
+    final nxt = <(double, double)>[pts[0]];
+    for (var i = 0; i < pts.length - 1; i++) {
+      final (ax, ay) = pts[i];
+      final (bx, by) = pts[i + 1];
+      final segLen = math.sqrt((bx - ax) * (bx - ax) + (by - ay) * (by - ay));
+      final len = segLen == 0.0 ? 1.0 : segLen;
+      final o = r.range(-off, off);
+      nxt.add((
+        (ax + bx) / 2.0 + (-(by - ay) / len) * o,
+        (ay + by) / 2.0 + ((bx - ax) / len) * o,
+      ));
+      nxt.add((bx, by));
+    }
+    pts = nxt;
+    off *= 0.52;
+  }
+  out.add(BoltBranch(pts, w, depth));
+  if (depth < 2) {
+    for (var i = 2; i < pts.length - 3; i++) {
+      if (r.chance(forks / (1 + depth) / math.max(4.0, pts.length / 6.0))) {
+        final (ax, ay) = pts[i];
+        final (bx, by) = pts[math.min(pts.length - 1, i + 3)];
+        final a = math.atan2(by - ay, bx - ax) + r.sign() * r.range(0.35, 0.95);
+        final fl = (l - (i / pts.length) * l) * r.range(0.25, 0.55);
+        out.addAll(
+          tree(
+            r,
+            ax,
+            ay,
+            ax + math.cos(a) * fl,
+            ay + math.sin(a) * fl,
+            jag * 1.1,
+            forks,
+            w * 0.55,
+            depth + 1,
+          ),
+        );
+      }
+    }
+  }
+  return out;
+}
+
+/// Raindrop splash on the floor, [age] seconds after landing at `(x, z)`.
+void splash(
+  Painter q,
+  double x,
+  double z,
+  double age,
+  double size,
+  ({int hot, int cool}) c,
+  double h,
+) {
+  final l = 0.3 + 0.12 * size;
+  final u = age / l;
+  if (u >= 1.0) return;
+  if (age < 0.07) {
+    q.px(x, z - 1.0, c.hot);
+    if (size > 0.3) {
+      final dy = age > 0.035 ? 1.0 : 0.0;
+      q.px(x - 1.0, z - 1.0 - dy, c.hot);
+      q.px(x + 1.0, z - 1.0 - dy, c.hot);
+    }
+    if (size > 0.65 && age > 0.03) {
+      q.px(x - 2.0, z - 2.0, c.cool);
+      q.px(x + 2.0, z - 2.0, c.cool);
+    }
+  }
+  final rx = 1.0 + (1.2 + 3.6 * size) * math.sqrt(u);
+  final ry = math.max(0.5, rx * 0.26);
+  final n = (rx * 6.5).ceil();
+  for (var j = 0; j < n; j++) {
+    final a = (j / n) * tau;
+    final s = math.sin(a);
+    if (s < -0.25) continue;
+    q.dot(
+      x + math.cos(a) * rx,
+      z + s * ry,
+      u < 0.3 && s > 0.0 ? c.hot : c.cool,
+      u < 0.45 ? (s > 0.2 ? 1.0 : 0.7) : (1.0 - u) * 1.6 * (s > 0.2 ? 1.0 : 0.6),
+    );
+  }
+  final nd = size > 0.55 ? 3 : 2;
+  final hi = (h * 1e6).floor();
+  for (var d = 0; d < nd; d++) {
+    final vx = (rand(hi, d, 1) - 0.5) * 2.0 * (25.0 + 35.0 * size);
+    final vy = -(55.0 + rand(hi, d, 2) * 70.0 * (0.5 + size));
+    final y = z - 1.0 + vy * age + 475.0 * age * age;
+    if (y > z - 0.5 || age > 0.34) continue;
+    final xx = x + vx * age;
+    q.px(xx, y, age < 0.12 ? c.hot : c.cool);
+    if (vy + 950.0 * age < -40.0) {
+      q.dot(xx - vx * 0.012, y + 1.0, c.cool, 0.7);
+    }
+  }
 }

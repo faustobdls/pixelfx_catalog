@@ -15,20 +15,20 @@ import 'ui.dart';
 import 'water.dart';
 import 'weather.dart';
 
-export 'arcane.dart';
-export 'critters.dart';
-export 'explosions.dart';
-export 'fire.dart';
-export 'ice.dart';
-export 'lightning.dart';
-export 'melee.dart';
-export 'moves.dart';
-export 'pickups.dart';
-export 'status.dart';
-export 'transitions.dart';
-export 'ui.dart';
-export 'water.dart';
-export 'weather.dart';
+export 'arcane.dart' show spellChargeEffect;
+export 'critters.dart' show slimeEffect;
+export 'explosions.dart' show smallExplosionEffect;
+export 'fire.dart' show fireballEffect, torchEffect;
+export 'ice.dart' show frostNovaEffect;
+export 'lightning.dart' show lightningStrikeEffect;
+export 'melee.dart' show swordSlashEffect;
+export 'moves.dart' show fireballThrowMove;
+export 'pickups.dart' show coinSpinEffect;
+export 'status.dart' show frozenEffect;
+export 'transitions.dart' show pixelDissolveEffect;
+export 'ui.dart' show levelUpEffect;
+export 'water.dart' show waterfallEffect;
+export 'weather.dart' show rainEffect;
 
 /// Wave 0 Showcase Pack: 15 signature effects spanning pure/simulated VFX, acts, moves, UI, pickups,
 /// weather loops, full-screen transitions, and procedural critters.

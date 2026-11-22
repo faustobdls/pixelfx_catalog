@@ -304,3 +304,181 @@ int heatColor(double t) {
   );
   return kFireRamp[idx];
 }
+
+int jsRound(double v) => (v + 0.5).floor();
+
+BoltTree bowed(
+  Rng r,
+  double x0,
+  double y0,
+  double x1,
+  double y1,
+  double bow, [
+  double jag = 0.22,
+  double forks = 0.4,
+]) {
+  final lRaw = hypot(x1 - x0, y1 - y0);
+  final l = lRaw == 0.0 ? 1.0 : lRaw;
+  final nx = -(y1 - y0) / l;
+  final ny = (x1 - x0) / l;
+  final mx = (x0 + x1) / 2.0 + nx * bow + r.range(-2, 2);
+  final my = (y0 + y1) / 2.0 + ny * bow;
+  final a = zigzag(r, x0, y0, mx, my, jag, forks);
+  final b = zigzag(r, mx, my, x1, y1, jag, forks);
+  return BoltTree([
+    BoltPath([...a.paths[0].pts, ...b.paths[0].pts.sublist(1)], 1.0),
+    ...a.paths.skip(1),
+    ...b.paths.skip(1),
+  ]);
+}
+
+void _stampBolt(double x, double y, double r, int lvl) {
+  if (r <= 0.5) {
+    _inkGrid.mark(jsRound(x), jsRound(y), lvl);
+    return;
+  }
+  _inkGrid.stamp(x, y, r, lvl);
+}
+
+void boltStrokeWith(
+  Painter p,
+  BoltTree b,
+  double k,
+  List<int> c, {
+  double s = 1.0,
+  bool hero = false,
+  double light = 0.5,
+  double a = 1.0,
+  double core = 0.0,
+  double? minY,
+  double? upTo,
+}) {
+  if (k <= 0.02) return;
+  for (final q in b.paths) {
+    final trunk = q.w >= 1.0;
+    if (!trunk && k < 0.5) continue;
+    final rh = (trunk ? (k > 0.6 ? 2.1 : 1.6) : 1.1) * s;
+    final rb = (trunk ? (k > 0.6 ? 1.3 : 0.8) : 0.5) * s;
+    final pts = upTo != null && trunk
+        ? q.pts.sublist(
+            0,
+            math.min(q.pts.length, math.max(2, (q.pts.length * upTo).ceil())),
+          )
+        : q.pts;
+    _walk(pts, (x, y, _) {
+      _stampBolt(x, y, rh, 1);
+      _stampBolt(x, y, rb, trunk ? 3 : 2);
+      if (trunk && k > 0.3) {
+        if (core > 0.0) {
+          _stampBolt(x, y, core, 4);
+        } else {
+          _inkGrid.mark(x, y, 4);
+        }
+      }
+    });
+    for (var i = 0; i < pts.length - 1; i += 3) {
+      if (minY == null || pts[i].$2 > minY) {
+        p.glow(
+          pts[i].$1,
+          pts[i].$2,
+          (trunk ? 14.0 : 7.0) * s,
+          c[4],
+          light * k * q.w,
+        );
+      }
+    }
+  }
+  _inkGrid.flush(
+    p,
+    hero ? [c[3], c[6], c[7], c[7]] : [c[2], c[4], c[5], c[7]],
+    [a, a, a, a],
+  );
+}
+
+(double x, double y, double vx, double vy) lightningFlight(
+  double x,
+  double y,
+  double vx,
+  double vy,
+  double age, {
+  double g = 0.45,
+  double drag = 2.2,
+  double floor = double.infinity,
+  double bounce = 0.45,
+}) {
+  const dt = 1.0 / 120.0;
+  for (var s = 0.0; s < age; s += dt) {
+    final h = math.min(dt, age - s);
+    vy += kGravity * g * h;
+    vx -= vx * drag * h;
+    vy -= vy * drag * h;
+    final ny = y + vy * h;
+    x += vx * h;
+    if (vy > 0.0 && y <= floor && ny >= floor) {
+      vy = -vy * bounce;
+      vx *= 0.7;
+      y = floor - 0.25;
+    } else {
+      y = ny;
+    }
+  }
+  return (x, y, vx, vy);
+}
+
+void lightningSpark(
+  Painter p,
+  double x,
+  double y,
+  double vx,
+  double vy,
+  double k,
+  List<int> s,
+) {
+  final spRaw = hypot(vx, vy);
+  final sp = spRaw == 0.0 ? 1.0 : spRaw;
+  final ux = vx / sp;
+  final uy = vy / sp;
+  final head = k > 0.6 ? s[0] : (k > 0.3 ? s[1] : s[2]);
+  final len = math.min(9.0, 1.0 + sp * 0.022);
+  p.line(
+    x - ux * len,
+    y - uy * len,
+    x - ux * len * 0.4,
+    y - uy * len * 0.4,
+    k > 0.5 ? head : s[s.length - 1],
+  );
+  p.line(x - ux * len * 0.45, y - uy * len * 0.45, x, y, head);
+  p.glow(x, y, 3, head, 0.45 * k);
+}
+
+void lightningPuff(
+  Painter p,
+  double x,
+  double y,
+  double size,
+  double u,
+  int c,
+) {
+  final k = 1.0 - u;
+  final r = size * (0.65 + math.min(1.0, u * 2.5) * 0.45 + u * 0.4);
+  final a = math.min(1.0, u * 12.0) * math.min(1.0, k * 2.4) * 0.58;
+  if (a <= 0.01) return;
+  final idx = math.min(
+    kSmokeRamp.length - 1,
+    math.max(0, (u * kSmokeRamp.length).floor()),
+  );
+  final col = mix(c, kSmokeRamp[idx], u);
+  p.disc(x, y, r, col, a * 0.45);
+  p.disc(x + r * 0.05, y + r * 0.06, r * 0.74, col, a * 0.62);
+  if (u < 0.5) {
+    p.disc(
+      x - r * 0.22,
+      y - r * 0.3,
+      r * 0.5,
+      mix(col, kWhite, 0.12),
+      a * 0.4 * (1.0 - u * 2.0),
+    );
+  }
+}
+
+Rng frameRng(int seed, int f, [int salt = 0]) => rng(seed, salt, f);

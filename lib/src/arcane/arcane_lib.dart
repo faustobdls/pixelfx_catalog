@@ -248,3 +248,61 @@ Uint8List actorShades(ActorDefinition a) {
   }
   return s;
 }
+
+const List<List<String>> arcaneSigils = [
+  ['..#..', '.#.#.', '#.#.#', '..#..', '.###.', '..#..', '.#.#.'],
+  ['#...#', '.#.#.', '..#..', '.###.', '..#..', '.#.#.', '#...#'],
+  ['#....', '##...', '#.#..', '#..#.', '#.#..', '##...', '#....'],
+  ['..#..', '#.#.#', '.###.', '..#..', '..#..', '.#.#.', '#...#'],
+  ['#.#.#', '#.#.#', '#####', '..#..', '..#..', '..#..', '.###.'],
+  ['#...#', '##.##', '#.#.#', '#...#', '#.#.#', '##.##', '#...#'],
+  ['..#..', '.#.#.', '#...#', '.#.#.', '..#..', '..#..', '..#..'],
+  ['#..#.', '#.#..', '##...', '#....', '##...', '#.#..', '#..#.'],
+];
+
+void sigil(
+  Painter p,
+  int i,
+  double x,
+  double y,
+  int c, [
+  double a = 1.0,
+  int edge = 0,
+]) {
+  final g = arcaneSigils[wrapInt(i, arcaneSigils.length)];
+  final ix = (x + 0.5).floor() - 2;
+  final iy = (y + 0.5).floor() - 3;
+  if (edge != 0) {
+    for (final (dx, dy) in _cross) {
+      p.sprite(g, const {}, ix + dx, iy + dy, tint: edge, a: a);
+    }
+  }
+  p.sprite(g, const {}, ix, iy, tint: c, a: a);
+}
+
+void squeezed(
+  Painter p,
+  ActorDefinition actor,
+  Uint8List sh,
+  double sx,
+  int body,
+  int edge, [
+  double a = 1.0,
+  double dx = 0.0,
+]) {
+  if (sx <= 0.02) return;
+  final cx = actor.x + actor.w / 2.0;
+  final half = actor.w / 2.0 + 1.0;
+  for (var y = 0; y < actor.h; y++) {
+    for (var x = (cx - half * sx).floor();
+        x <= (cx + half * sx).ceil();
+        x++) {
+      final raw = cx + (x + 0.5 - cx) / sx - 0.5;
+      final i = (raw + 0.5).floor() - actor.x;
+      final v = (i < 0 || i >= actor.w) ? 0 : sh[y * actor.w + i];
+      if (v != 0) {
+        p.dot(x + dx, (actor.y + y).toDouble(), v == 1 ? edge : body, a);
+      }
+    }
+  }
+}

@@ -661,3 +661,110 @@ class _EmberSeed {
   }
   return (tip: tipAt, fl: fl);
 }
+
+/// A spark's flight: falls, drags, and bounces off the floor at [floor].
+(double x, double y, double vx, double vy) sparkAt(
+  double x,
+  double y,
+  double vx,
+  double vy,
+  double t, [
+  double floor = 0.0,
+  double g = 427.0,
+  double k = 2.2,
+]) {
+  var sx = x;
+  var sy = y;
+  var svx = vx;
+  var svy = vy;
+  var left = t;
+  for (var b = 0; b < 3; b++) {
+    final e = drift(sx, sy, svx, svy, left, 0.0, g, k, k);
+    if (e.$2 < floor || sy >= floor) return e;
+    var lo = 0.0;
+    var hi = left;
+    for (var i = 0; i < 16; i++) {
+      final m = (lo + hi) * 0.5;
+      if (drift(sx, sy, svx, svy, m, 0.0, g, k, k).$2 < floor) {
+        lo = m;
+      } else {
+        hi = m;
+      }
+    }
+    final c = drift(sx, sy, svx, svy, hi, 0.0, g, k, k);
+    sx = c.$1;
+    sy = floor - 0.25;
+    svx = c.$3 * 0.7;
+    svy = -c.$4.abs() * 0.45;
+    left -= hi;
+  }
+  final e = drift(sx, sy, svx, svy, left, 0.0, g, k, k);
+  return e.$2 < floor ? e : (e.$1, floor - 0.25, e.$3, 0.0);
+}
+
+/// A pool of light on the floor: an ellipse of glow, [k] at its middle falling to 0 at its rim.
+void floorLight(
+  Painter p,
+  double x,
+  double y,
+  double rx,
+  double ry,
+  int c,
+  double k,
+) {
+  if (k <= 0.004 || rx < 1.0 || ry < 0.5) return;
+  p.shade(x - rx, y - ry, x + rx, y + ry, (px, py, out) {
+    final dx = (px - x) / rx;
+    final dy = (py - y) / ry;
+    final d = dx * dx + dy * dy;
+    if (d >= 1.0) return null;
+    final f = 1.0 - math.sqrt(d);
+    out.l = c;
+    out.k = f * f * k;
+    return null;
+  });
+}
+
+/// Draws [ps] with its flame puffs recoloured down the hot-first ramp [hRamp].
+void simDraw(Painter p, Particles ps, List<int> hRamp, [String? layer]) {
+  final all = List<SimParticle>.from(ps.list);
+  final rest = <SimParticle>[];
+  final fire = <SimParticle>[];
+  for (final q in all) {
+    if (q.k == P.fire) {
+      fire.add(q);
+    } else {
+      rest.add(q);
+    }
+  }
+  void puffs(bool back) {
+    for (final q in fire) {
+      if (q.delay <= 0.0 && ((q.flag & PF.back) != 0) == back) {
+        firePuff(
+          p,
+          q.x,
+          q.y,
+          q.life / q.max,
+          q.size,
+          q.seed.remainder(1.0),
+          hRamp,
+        );
+      }
+    }
+  }
+
+  ps.list
+    ..clear()
+    ..addAll(rest);
+  if (layer != 'front') {
+    ps.draw(p, 'back');
+    puffs(true);
+  }
+  if (layer != 'back') {
+    puffs(false);
+    ps.draw(p, 'front');
+  }
+  ps.list
+    ..clear()
+    ..addAll(all);
+}

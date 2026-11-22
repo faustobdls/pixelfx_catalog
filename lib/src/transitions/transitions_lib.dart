@@ -3,6 +3,7 @@
 // (https://www.spritefusion.com/pixel-art-vfx/sparkle), MIT License, Copyright (c) 2026 Hugo Duprez.
 
 import 'dart:math' as math;
+import 'dart:typed_data';
 
 import 'package:pixelfx_core/pixelfx_core.dart';
 
@@ -149,3 +150,238 @@ void transitionGlint(
 }
 
 double lifeLeft(double life, double t, double end) => math.min(life, end - t);
+
+void _fillConvexCore(
+  Painter p,
+  List<(double, double)> pts,
+  int Function(double x, double y) colorAt,
+  double a,
+) {
+  if (pts.isEmpty) return;
+  var y0 = double.infinity;
+  var y1 = double.negativeInfinity;
+  for (final (_, y) in pts) {
+    if (y < y0) y0 = y;
+    if (y > y1) y1 = y;
+  }
+  if (!y0.isFinite || !y1.isFinite) return;
+  final r0 = math.max(0, (y0 - 0.5).ceil());
+  final r1 = math.min(kScreenH - 1, (y1 - 0.5).floor());
+  final n = pts.length;
+  final unrot = _unrotated(p);
+  final fx = p.fx;
+  final b = _col0(p);
+  for (var y = r0; y <= r1; y++) {
+    final yc = y + 0.5;
+    var xl = double.infinity;
+    var xr = double.negativeInfinity;
+    for (var i = 0, j = n - 1; i < n; j = i++) {
+      final (xi, yi) = pts[i];
+      final (xj, yj) = pts[j];
+      if ((yi > yc) == (yj > yc)) continue;
+      final x = xi + ((yc - yi) * (xj - xi)) / (yj - yi);
+      if (x < xl) xl = x;
+      if (x > xr) xr = x;
+    }
+    if (!xl.isFinite || !xr.isFinite) continue;
+    final c0 = math.max(0, (xl - 0.5).ceil());
+    final c1 = math.min(kScreenW - 1, (xr - 0.5).floor());
+    if (unrot) {
+      final sy = (p.ty + yc).floor();
+      for (var x = c0; x <= c1; x++) {
+        final col = colorAt(x + 0.5, yc);
+        if (col != 0) p.put(b + fx * x, sy, col, a);
+      }
+    } else {
+      for (var x = c0; x <= c1; x++) {
+        final col = colorAt(x + 0.5, yc);
+        if (col != 0) p.dot(x.toDouble(), y.toDouble(), col, a);
+      }
+    }
+  }
+}
+
+void fillConvex(
+  Painter p,
+  List<(double, double)> pts,
+  int c, [
+  double a = 1.0,
+]) {
+  _fillConvexCore(p, pts, (_, _) => c, a);
+}
+
+void fillConvexFn(
+  Painter p,
+  List<(double, double)> pts,
+  int Function(double x, double y) colorAt, [
+  double a = 1.0,
+]) {
+  _fillConvexCore(p, pts, colorAt, a);
+}
+
+List<(double, double)> halfPlane(
+  List<(double, double)> pts,
+  double cx,
+  double cy,
+  double nx,
+  double ny,
+) {
+  final out = <(double, double)>[];
+  double side((double, double) pt) => (pt.$1 - cx) * nx + (pt.$2 - cy) * ny;
+  for (var i = 0; i < pts.length; i++) {
+    final a = pts[i];
+    final b = pts[(i + 1) % pts.length];
+    final sa = side(a);
+    final sb = side(b);
+    if (sa >= 0.0) out.add(a);
+    if ((sa >= 0.0) != (sb >= 0.0)) {
+      final k = sa / (sa - sb);
+      out.add((a.$1 + (b.$1 - a.$1) * k, a.$2 + (b.$2 - a.$2) * k));
+    }
+  }
+  return out;
+}
+
+class ScalarField {
+  final Float32List f;
+  final Float32List g;
+  final Float32List ny;
+  final double lo;
+  final double hi;
+  final Uint32List order;
+  final Float32List sorted;
+
+  ScalarField({
+    required this.f,
+    required this.g,
+    required this.ny,
+    required this.lo,
+    required this.hi,
+    required this.order,
+    required this.sorted,
+  });
+
+  int below(double v) {
+    var a = 0;
+    var b = sorted.length;
+    while (a < b) {
+      final m = (a + b) >> 1;
+      if (sorted[m] < v) {
+        a = m + 1;
+      } else {
+        b = m;
+      }
+    }
+    return a;
+  }
+}
+
+ScalarField screenField(
+  double Function(double x, double y) fn, [
+  double gmin = 0.45,
+  double gmax = 3.0,
+]) {
+  const n = kScreenW * kScreenH;
+  final f = Float32List(n);
+  final g = Float32List(n);
+  final ny = Float32List(n);
+  var lo = double.infinity;
+  var hi = double.negativeInfinity;
+  for (var y = 0; y < kScreenH; y++) {
+    for (var x = 0; x < kScreenW; x++) {
+      final v = fn(x + 0.5, y + 0.5);
+      f[y * kScreenW + x] = v;
+      if (v < lo) lo = v;
+      if (v > hi) hi = v;
+    }
+  }
+  for (var y = 0; y < kScreenH; y++) {
+    for (var x = 0; x < kScreenW; x++) {
+      final xa = math.max(0, x - 1);
+      final xb = math.min(kScreenW - 1, x + 1);
+      final ya = math.max(0, y - 1);
+      final yb = math.min(kScreenH - 1, y + 1);
+      final gx = (f[y * kScreenW + xb] - f[y * kScreenW + xa]) / (xb - xa);
+      final gy = (f[yb * kScreenW + x] - f[ya * kScreenW + x]) / (yb - ya);
+      final len = math.sqrt(gx * gx + gy * gy);
+      g[y * kScreenW + x] = 1.0 / clamp(len, gmin, gmax);
+      ny[y * kScreenW + x] = len > 1e-6 ? gy / len : 0.0;
+    }
+  }
+  final order = Uint32List(n);
+  for (var i = 0; i < n; i++) {
+    order[i] = i;
+  }
+  order.sort((a, b) {
+    final cmp = f[a].compareTo(f[b]);
+    return cmp != 0 ? cmp : a.compareTo(b);
+  });
+  final sorted = Float32List(n);
+  for (var i = 0; i < n; i++) {
+    sorted[i] = f[order[i]];
+  }
+  return ScalarField(
+    f: f,
+    g: g,
+    ny: ny,
+    lo: lo,
+    hi: hi,
+    order: order,
+    sorted: sorted,
+  );
+}
+
+class ScreenPixels {
+  final Painter _p;
+  final bool _unrot;
+  final double _tx;
+  final double _ty;
+  final int _fx;
+  int _sx = 0;
+  int _sy = 0;
+  int _i0 = 0;
+
+  ScreenPixels(this._p)
+      : _unrot = _p.sn == 0.0 && _p.cs == 1.0,
+        _tx = _p.tx,
+        _ty = _p.ty,
+        _fx = _p.fx;
+
+  void at(int i) {
+    if (_unrot) {
+      _sx = (_tx + ((i % kScreenW) + 0.5) * _fx).floor();
+      _sy = (_ty + (i ~/ kScreenW) + 0.5).floor();
+    } else {
+      _i0 = i;
+    }
+  }
+
+  double get _x => (_i0 % kScreenW) + 0.5;
+  double get _y => (_i0 ~/ kScreenW) + 0.5;
+
+  void put(int c, [double a = 1.0]) {
+    if (_unrot) {
+      _p.put(_sx, _sy, c, a);
+    } else {
+      _p.dot(_x, _y, c, a);
+    }
+  }
+
+  void add(int c, double k) {
+    if (_unrot) {
+      _p.add(_sx, _sy, c, k);
+    } else {
+      _p.light(_x, _y, c, k);
+    }
+  }
+
+  void blend(int c, double a) {
+    if (_unrot) {
+      _p.blendPx(_sx, _sy, c, a);
+    } else {
+      _p.blend(_x, _y, c, a);
+    }
+  }
+}
+
+ScreenPixels screenPixels(Painter p) => ScreenPixels(p);

@@ -3,39 +3,40 @@ import 'package:pixelfx_core/pixelfx_core.dart';
 import 'package:test/test.dart';
 
 void main() {
-  group('pixelfx_catalog Wave 0 Showcase', () {
-    test('registers all 15 effects and 21 categories', () {
+  group('pixelfx_catalog Full Catalog & Showcase', () {
+    test('registers all 244 effects across 21 categories and preserves showcase', () {
       final registry = createDefaultRegistry();
       expect(registry.categories.length, 21);
-      expect(registry.assets.length, 15);
+      expect(registry.assets.length, 244);
+      expect(catalogEffects.length, 244);
       expect(showcaseEffects.length, 15);
 
-      const expectedIds = [
-        'fire/torch',
-        'fire/fireball',
-        'arcane/spell-charge',
-        'explosions/small-explosion',
-        'melee/sword-slash',
-        'ice/frost-nova',
-        'status/frozen',
-        'lightning/lightning-strike',
-        'water/waterfall',
-        'ui/level-up',
-        'pickups/coin-spin',
-        'weather/rain',
-        'transitions/pixel-dissolve',
-        'critters/slime',
-        'moves/fireball-throw',
-      ];
-      for (final id in expectedIds) {
-        expect(registry.getEffect(id), isNotNull, reason: 'Missing $id');
+      final ids = catalogEffects.map((e) => e.meta.id).toList();
+      expect(ids.toSet().length, 244);
+      final sorted = [...ids]..sort();
+      expect(ids, orderedEquals(sorted));
+
+      for (final fx in showcaseEffects) {
+        expect(registry.getEffect(fx.meta.id), isNotNull,
+            reason: 'Missing showcase ${fx.meta.id}');
+      }
+      for (final fx in catalogEffects) {
+        expect(registry.getEffect(fx.meta.id), isNotNull,
+            reason: 'Missing ${fx.meta.id}');
+      }
+      for (final cat in registry.categories) {
+        expect(
+          catalogEffects.where((e) => e.meta.category == cat.id),
+          isNotEmpty,
+          reason: 'Empty category ${cat.id}',
+        );
       }
     });
 
-    test('all 15 effects render deterministically and survive a 4-step palette', () {
+    test('all 244 effects render deterministically and survive a 4-step palette', () {
       final shortPalette = ['#141024', '#5a3c8c', '#c8a0f0', '#ffffff'];
 
-      for (final fx in showcaseEffects) {
+      for (final fx in catalogEffects) {
         final m = fx.meta;
         final frameA = createFrame(m.width, m.height);
         final frameB = createFrame(m.width, m.height);
@@ -76,9 +77,9 @@ void main() {
       }
     });
 
-    test('acted effects run to completion or valid loop state', () {
+    test('all acted effects run to completion or valid loop state', () {
       final registry = createDefaultRegistry();
-      final acted = showcaseEffects.where((e) => e.act != null).toList();
+      final acted = catalogEffects.where((e) => e.act != null).toList();
       expect(acted.length, greaterThanOrEqualTo(5));
 
       for (final fx in acted) {

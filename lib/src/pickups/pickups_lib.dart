@@ -303,8 +303,8 @@ void coin(
   double a = 1.0,
   bool snap = true,
 }) {
-  final xx = snap ? x.roundToDouble() : x;
-  final yy = snap ? y.roundToDouble() : y;
+  final xx = snap ? (x + 0.5).floorToDouble() : x;
+  final yy = snap ? (y + 0.5).floorToDouble() : y;
   final cs = math.cos(spin);
   final sn = math.sin(spin);
   final b = math.max(0.5, r * cs.abs());
@@ -351,8 +351,8 @@ void gemlet(
   bool white = false,
   double a = 1.0,
 }) {
-  final xx = x.round();
-  final yy = y.round();
+  final xx = (x + 0.5).floor();
+  final yy = (y + 0.5).floor();
   final ca = math.cos(ang);
   final sa = math.sin(ang);
   final n = g.length;
@@ -489,6 +489,167 @@ GemSolid prism({
   );
 }
 
+({double x, double y, double k}) drawGem(
+  SpriteLayer l,
+  Painter p,
+  GemSolid g,
+  double x,
+  double y,
+  double spin,
+  List<int> c, {
+  double tilt = 0.32,
+  bool white = false,
+  double a = 1.0,
+  bool edges = true,
+  double gain = 1.0,
+}) {
+  final cs = math.cos(spin);
+  final sn = math.sin(spin);
+  final ct = math.cos(tilt);
+  final st = math.sin(tilt);
+  final planes = g.planes
+      .map((q) => GemPlane(
+            [
+              q.n[0] * cs - q.n[2] * sn,
+              q.n[1],
+              q.n[0] * sn + q.n[2] * cs,
+            ],
+            q.d,
+            q.kind,
+          ))
+      .toList();
+  const lx = -0.55;
+  const ly = 0.72;
+  const lz = 0.42;
+  final dx = 0.0;
+  final dy = -st;
+  final dz = -ct;
+  final vx = 0.0;
+  final vy = st;
+  final vz = ct;
+  final hl = math.sqrt((lx + vx) * (lx + vx) +
+      (ly + vy) * (ly + vy) +
+      (lz + vz) * (lz + vz));
+  final hx = (lx + vx) / hl;
+  final hy = (ly + vy) / hl;
+  final hz = (lz + vz) / hl;
+  final xi = (x + 0.5).floor();
+  final yi = (y + 0.5).floor();
+  final rad = g.r.ceil() + 2;
+  final top = (g.top + 2).ceil();
+  final bot = (g.bottom + 2).ceil();
+  var best = -1.0;
+  var bx = xi.toDouble();
+  var by = yi.toDouble();
+  final ids = <int, int>{};
+  l.begin(xi - rad, yi - top);
+  l.fill(xi - rad, yi - top, xi + rad, yi + bot, (px, py) {
+    final sx = px - xi;
+    final sy = -(py - yi);
+    final ox = sx;
+    final oy = sy * ct;
+    final oz = -sy * st;
+    var t0 = -1e9;
+    var t1 = 1e9;
+    var hitIdx = -1;
+    for (var idx = 0; idx < planes.length; idx++) {
+      final q = planes[idx];
+      final nd = q.n[0] * dx + q.n[1] * dy + q.n[2] * dz;
+      final no = q.n[0] * ox + q.n[1] * oy + q.n[2] * oz;
+      if (nd.abs() < 1e-6) {
+        if (no > q.d) return 0;
+        continue;
+      }
+      final tt = (q.d - no) / nd;
+      if (nd < 0.0) {
+        if (tt > t0) {
+          t0 = tt;
+          hitIdx = idx;
+        }
+      } else if (tt < t1) {
+        t1 = tt;
+      }
+    }
+    if (hitIdx < 0 || t0 > t1) return 0;
+    if (white) return kWhite;
+    ids[(px.floor() + 500) * 1000 + py.floor() + 500] = hitIdx;
+    final hit = planes[hitIdx];
+    final n = hit.n;
+    final pav = hit.kind == 4 || hit.kind == 5 || hit.kind == 8;
+    final mx = n[0];
+    final my = pav ? -n[1] * 0.6 : n[1];
+    final mz = n[2];
+    final ml = math.sqrt(mx * mx + my * my + mz * mz);
+    final lam = math.max(0.0, (mx * lx + my * ly + mz * lz) / ml);
+    final spec = math.pow(
+      math.max(0.0, (mx * hx + my * hy + mz * hz) / ml),
+      18,
+    ).toDouble();
+    var b = pav
+        ? 0.02 + 0.72 * math.pow(lam, 2.4).toDouble()
+        : (hit.kind == 3
+            ? 0.12 + 0.4 * lam
+            : 0.04 + 0.66 * math.pow(lam, 1.8).toDouble());
+    if (hit.kind == 6) {
+      b = 0.16 +
+          0.66 *
+              math.pow(
+                math.max(0.0, (n[0] * lx + n[2] * lz) / hypot(lx, lz)),
+                1.3,
+              ).toDouble();
+    } else if (hit.kind == 7) {
+      b = 0.22 + 0.62 * math.pow(lam, 1.2).toDouble();
+    } else if (hit.kind == 9) {
+      b = 0.62 + 0.25 * lam;
+    } else if (hit.kind == 10) {
+      b = 0.3 +
+          0.5 * lam +
+          (rand((px - xi).floor(), (py - yi).floor(), 43) - 0.5) * 0.08;
+    }
+    if (hit.kind != 9) b *= gain;
+    if (hit.kind == 0) b -= 0.04;
+    final s = b + spec * 0.6;
+    if (s > best) {
+      best = s;
+      bx = px;
+      by = py;
+    }
+    if (spec > 0.8) return pav ? c[6] : kWhite;
+    return c[clampInt((1.0 + s * 5.6 + 0.5).floor(), 1, 6)];
+  });
+  if (!white && edges) {
+    final out = <(int, int, int)>[];
+    for (final entry in ids.entries) {
+      final key = entry.key;
+      final id = entry.value;
+      final kx = key ~/ 1000;
+      final ky = key - kx * 1000;
+      final ex = kx - 500;
+      final ey = ky - 500;
+      final rId = ids[key + 1000];
+      final dId = ids[key + 1];
+      if ((rId != null && rId != id) || (dId != null && dId != id)) {
+        final col = l.get(ex, ey);
+        final i = c.indexOf(col);
+        final kind = planes[id].kind;
+        final pav = kind == 4 || kind == 5 || kind == 8;
+        if (i > 0) {
+          out.add((
+            ex,
+            ey,
+            pav ? c[math.max(1, i - 1)] : c[math.min(7, i + 1)],
+          ));
+        }
+      }
+    }
+    for (final (ex, ey, col) in out) {
+      l.set(ex, ey, col);
+    }
+  }
+  l.outline(c[0]).draw(p, 0, 0, a);
+  return (x: bx, y: by, k: best);
+}
+
 double coin3d(
   SpriteLayer l,
   Painter p,
@@ -517,8 +678,8 @@ double coin3d(
   final hz = lz / ln + 1.0;
   final hn = hypot(hx, hz);
   final base = clampInt((2.0 + lam * 3.2).round(), 2, 5);
-  final xi = x.round();
-  final yi = y.round();
+  final xi = (x + 0.5).floor();
+  final yi = (y + 0.5).floor();
   final b = (r + th).ceil() + 2;
   var flash = 0.0;
   l.begin(xi - b, yi - b);
